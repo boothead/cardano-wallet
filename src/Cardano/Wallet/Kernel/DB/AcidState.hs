@@ -54,6 +54,7 @@ import           Control.Lens ((.=))
 import           Control.Lens.TH (makeLenses)
 import           Control.Monad.Except (MonadError, catchError)
 import           Data.Acid (Query, Update, makeAcidic)
+import           Data.List (zip)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import           Data.SafeCopy (base, deriveSafeCopy)
@@ -65,6 +66,7 @@ import           Pos.Chain.Block (HeaderHash)
 import           Pos.Chain.Txp (TxAux, TxId, Utxo)
 import           Pos.Chain.Update (SoftwareVersion)
 import           Pos.Core.Chrono (OldestFirst (..))
+import           Pos.Crypto (PublicKey, firstHardened)
 
 import           Cardano.Wallet.Kernel.DB.BlockContext
 import           Cardano.Wallet.Kernel.DB.HdWallet
@@ -544,33 +546,35 @@ createHdWallet newRoot defaultHdAccountId defaultHdAddress utxoByAccount =
 -- implementation we cannot create new addresses without root secret key).
 --
 createHdExternalWallet :: HdRoot
-                       -> HdAccountId
-                       -- ^ The default HdAccountId to go with this HdRoot. This
-                       -- function will take responsibility of creating the associated
-                       -- 'HdAccount'.
-                       -> Map HdAccountId (Utxo, [AddrWithId])
+                       -> [PublicKey]
+                       -> Word
                        -> Update DB (Either HD.CreateHdRootError ())
-createHdExternalWallet newRoot defaultHdAccountId utxoByAccount =
+createHdExternalWallet newRoot accountsPKs _addressPoolGap =
     runUpdateDiscardSnapshot . zoom dbHdWallets $ do
       HD.createHdRoot newRoot
-      updateAccounts_ $ map mkUpdateCreateHdWallet (Map.toList (insertDefault utxoByAccount))
+      let hdAccountsIds = map (\ix -> HdAccountId (_hdRootId newRoot) (HdAccountIx ix)) mkAccountIxs
+          hdAccountsIdsWithPKs = zip hdAccountsIds accountsPKs
+      updateAccounts_ $ map mkAccountUpdate hdAccountsIdsWithPKs
+      -- TODO: Public keys 'accountsPKs' and address pool gap 'addressPoolGap'
+      -- should be stored somewhere (most likely in 'acid-state').
+      -- It will be discussed later, in 'Public Key Storage' task.
   where
-    insertDefault :: Map HdAccountId (Utxo, [AddrWithId])
-                  -> Map HdAccountId (Utxo, [AddrWithId])
-    insertDefault m = case Map.lookup defaultHdAccountId m of
-        Just _  -> m
-        Nothing ->
-            -- Completely new account, without addresses (yet).
-            Map.insert defaultHdAccountId (mempty, []) m
+    mkAccountIxs :: [Word32]
+    mkAccountIxs =
+        if numOfAccounts == 1
+            then [firstHardened]
+            else [firstHardened, firstHardened + 1 .. firstHardened + (numOfAccounts - 1)]
+      where
+        numOfAccounts = fromIntegral $ length accountsPKs
 
-    mkUpdateCreateHdWallet :: (HdAccountId, (Utxo, [AddrWithId]))
-                           -> AccountUpdate HD.CreateHdRootError ()
-    mkUpdateCreateHdWallet (accId, (utxo, addrs)) = AccountUpdate {
-          accountUpdateId    = accId
-        , accountUpdateNew   = AccountUpdateNewUpToDate utxo
-        , accountUpdateAddrs = addrs
-        , accountUpdate      = return () -- just need to create it, no more
-        }
+    mkAccountUpdate :: (HdAccountId, PublicKey)
+                    -> AccountUpdate HD.CreateHdRootError ()
+    mkAccountUpdate (accId, _) =
+        AccountUpdate { accountUpdateId    = accId
+                      , accountUpdateNew   = AccountUpdateNewUpToDate (mempty :: Utxo)
+                      , accountUpdateAddrs = []
+                      , accountUpdate      = return () -- just need to create it, no more
+                      }
 
 -- | Begin restoration by creating an HdWallet with the given HdRoot,
 -- starting from the 'HdAccountOutsideK' state.

@@ -538,6 +538,10 @@ instance FromHttpApiData PublicKeyAsBase58 where
 instance ToHttpApiData PublicKeyAsBase58 where
     toQueryParam (PublicKeyAsBase58Unsafe pk) = pk
 
+-- | To be able to work with the list of encoded public keys.
+instance Buildable [PublicKeyAsBase58] where
+    build = bprint listJson
+
 -- | Smart constructor for 'PublicKeyAsBase58'.
 mkPublicKeyAsBase58 :: PublicKey -> PublicKeyAsBase58
 mkPublicKeyAsBase58 (PublicKey xPub) = PublicKeyAsBase58Unsafe encodedXPub
@@ -655,7 +659,8 @@ mkTransactionSignatureAsBase16 (Core.Signature txSig) =
 -- | A type modelling the request for a new 'ExternalWallet',
 -- on the mobile client or hardware wallet.
 data NewExternalWallet = NewExternalWallet
-    { newewalRootPK         :: !PublicKeyAsBase58
+    { newewalAccountsPKs    :: ![PublicKeyAsBase58]
+    , newewalAddressPoolGap :: !(Maybe Word)
     , newewalAssuranceLevel :: !AssuranceLevel
     , newewalName           :: !WalletName
     } deriving (Eq, Show, Generic)
@@ -664,12 +669,14 @@ deriveJSON Aeson.defaultOptions ''NewExternalWallet
 instance Arbitrary NewExternalWallet where
     arbitrary = NewExternalWallet <$> arbitrary
                                   <*> arbitrary
+                                  <*> arbitrary
                                   <*> pure "My external Wallet"
 
 instance ToSchema NewExternalWallet where
     declareNamedSchema =
         genericSchemaDroppingPrefix "newewal" (\(--^) props -> props
-            & ("rootPK"         --^ "Root public key to identify external wallet.")
+            & ("accountsPKs"    --^ "External wallet's accounts public keys.")
+            & ("addressPoolGap" --^ "Address pool gap for this wallet.")
             & ("assuranceLevel" --^ "Desired assurance level based on the number of confirmations counter of each transaction.")
             & ("name"           --^ "External wallet's name.")
         )
@@ -677,11 +684,13 @@ instance ToSchema NewExternalWallet where
 deriveSafeBuildable ''NewExternalWallet
 instance BuildableSafeGen NewExternalWallet where
     buildSafeGen sl NewExternalWallet{..} = bprint ("{"
-        %" rootPK="%buildSafe sl
+        %" accountsPKs="%buildSafe sl
+        %" addressPoolGap="%build
         %" assuranceLevel="%buildSafe sl
         %" name="%buildSafe sl
         %" }")
-        newewalRootPK
+        newewalAccountsPKs
+        newewalAddressPoolGap
         newewalAssuranceLevel
         newewalName
 
@@ -997,10 +1006,17 @@ instance BuildableSafeGen Wallet where
 instance Buildable [Wallet] where
     build = bprint listJson
 
+instance ToSchema PublicKey where
+    declareNamedSchema _ =
+        pure $ NamedSchema (Just "PublicKey") $ mempty
+            & type_ .~ SwaggerString
+
 -- | An external wallet (mobile client or hardware wallet).
 data ExternalWallet = ExternalWallet
     { ewalId             :: !WalletId
     , ewalName           :: !WalletName
+    , ewalAccountsPKs    :: ![PublicKey]
+    , ewalAddressPoolGap :: !Word
     , ewalBalance        :: !(V1 Core.Coin)
     , ewalAssuranceLevel :: !AssuranceLevel
     } deriving (Eq, Ord, Show, Generic)
@@ -1011,6 +1027,8 @@ instance ToSchema ExternalWallet where
         genericSchemaDroppingPrefix "ewal" (\(--^) props -> props
             & ("id"             --^ "Unique wallet identifier.")
             & ("name"           --^ "Wallet's name.")
+            & ("accountsPKs"    --^ "Wallet's accounts' public keys.")
+            & ("addressPoolGap" --^ "Address pool gap for this wallet.")
             & ("balance"        --^ "Current balance, in Lovelaces.")
             & ("assuranceLevel" --^ "The assurance level of the wallet.")
         )
@@ -1020,16 +1038,20 @@ instance Arbitrary ExternalWallet where
                                <*> pure "My external wallet"
                                <*> arbitrary
                                <*> arbitrary
+                               <*> arbitrary
+                               <*> arbitrary
 
 deriveSafeBuildable ''ExternalWallet
 instance BuildableSafeGen ExternalWallet where
   buildSafeGen sl ExternalWallet{..} = bprint ("{"
     %" id="%buildSafe sl
     %" name="%buildSafe sl
+    %" addressPoolGap="%build
     %" balance="%buildSafe sl
     %" }")
     ewalId
     ewalName
+    ewalAddressPoolGap
     ewalBalance
 
 --------------------------------------------------------------------------------
@@ -2357,6 +2379,7 @@ instance Example TransactionSignatureAsBase16 where
 
 instance Example NewExternalWallet where
     example = NewExternalWallet <$> example
+                                <*> pure (Just 20)
                                 <*> example
                                 <*> pure "My external Wallet"
 

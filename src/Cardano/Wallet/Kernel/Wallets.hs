@@ -230,10 +230,10 @@ createHdWallet pw mnemonic spendingPassword assuranceLevel walletName = do
 
 -- | Creates a new external HD 'Wallet'.
 createExternalHdWallet :: PassiveWallet
-                       -> PublicKey
-                       -- ^ Extended public key that corresponds to the root secret key of
-                       -- this external wallet (assumed that root secret key is storing
-                       -- externally, for example in the memory of Ledger device).
+                       -> [PublicKey]
+                       -- ^ External wallet's accounts public keys.
+                       -> Word
+                       -- ^ Address pool gap for this wallet.
                        -> AssuranceLevel
                        -- ^ The 'AssuranceLevel' for this wallet, namely after how many
                        -- blocks each transaction is considered 'adopted'. This translates
@@ -242,10 +242,19 @@ createExternalHdWallet :: PassiveWallet
                        -> WalletName
                        -- ^ The name for this wallet.
                        -> IO (Either CreateExternalWalletError HdRoot)
-createExternalHdWallet pw rootPK assuranceLevel walletName = do
+createExternalHdWallet pw accountsPKs addressPoolGap assuranceLevel walletName = do
+    -- Here, we review the definition of a wallet down to a list of account public keys with
+    -- no relationship whatsoever from the wallet's point of view. New addresses can be derived
+    -- for each account at will and discovered using the address pool discovery algorithm
+    -- described in BIP-44. Public keys are managed and provided from an external sources.
     created <- InDb <$> getCurrentTimestamp
-    let nm      = makeNetworkMagic (pw ^. walletProtocolMagic)
-        rootId  = pkToHdRootId nm rootPK
+    let nm = makeNetworkMagic (pw ^. walletProtocolMagic)
+    -- By default we need a root key for creating 'HdRoot'. But we don't have a root key
+    -- for externally-owned sequential wallet, so just take the first account's public
+    -- key as a base for wallet's 'HdRoot'.
+    -- TODO: ask if we can do that!
+    let (firstAccountPK:_) = accountsPKs -- We already know that list is not empty.
+        rootId  = pkToHdRootId nm firstAccountPK
         newRoot = HD.initHdRoot rootId
                                 walletName
                                 HD.NoSpendingPassword
@@ -253,7 +262,7 @@ createExternalHdWallet pw rootPK assuranceLevel walletName = do
                                 created
     -- We now have all the data we need to atomically generate a new
     -- external wallet with a default account.
-    res <- update' (pw ^. wallets) $ CreateHdExternalWallet newRoot (defaultHdAccountId rootId) mempty
+    res <- update' (pw ^. wallets) $ CreateHdExternalWallet newRoot accountsPKs addressPoolGap
     case either Left (const (Right newRoot)) res of
         Left e@(HD.CreateHdRootExists _) ->
             return . Left $ CreateExternalWalletFailed e

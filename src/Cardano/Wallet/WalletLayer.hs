@@ -96,8 +96,9 @@ instance Buildable CreateWalletError where
         bprint ("CreateWalletError " % build) kernelError
 
 data CreateExternalWalletError =
-      CreateExternalWalletInvalidRootPK Base58PublicKeyError
-    | CreateExternalWalletError Kernel.CreateExternalWalletError
+    CreateExternalWalletNoAccountsPKs
+  | CreateExternalWalletInvalidAccountPK Base58PublicKeyError  
+  | CreateExternalWalletError Kernel.CreateExternalWalletError
 
 -- | Unsound show instance needed for the 'Exception' instance.
 instance Show CreateExternalWalletError where
@@ -110,8 +111,10 @@ instance Arbitrary CreateExternalWalletError where
                       ]
 
 instance Buildable CreateExternalWalletError where
-    build (CreateExternalWalletInvalidRootPK pkError) =
-        bprint ("CreateExternalWalletInvalidRootPK " % build) pkError
+    build CreateExternalWalletNoAccountsPKs =
+        bprint "CreateExternalWalletNoAccountsPKs "
+    build (CreateExternalWalletInvalidAccountPK pkError) =
+        bprint ("CreateExternalWalletInvalidAccountPK " % build) pkError
     build (CreateExternalWalletError kernelError) =
         bprint ("CreateExternalWalletError " % build) kernelError
 
