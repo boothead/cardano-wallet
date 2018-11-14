@@ -5,6 +5,7 @@
 module Cardano.Wallet.Kernel.DB.AcidState (
     -- * Top-level database
     DB(..)
+  , dbEosHdWallets
   , dbHdWallets
   , defDB
     -- * Acid-state operations
@@ -69,6 +70,7 @@ import           Pos.Core.Chrono (OldestFirst (..))
 import           Pos.Crypto (PublicKey, firstHardened)
 
 import           Cardano.Wallet.Kernel.DB.BlockContext
+import           Cardano.Wallet.Kernel.DB.EosHdWallet
 import           Cardano.Wallet.Kernel.DB.HdWallet
 import qualified Cardano.Wallet.Kernel.DB.HdWallet.Create as HD
 import qualified Cardano.Wallet.Kernel.DB.HdWallet.Delete as HD
@@ -110,6 +112,10 @@ data DB = DB {
       -- | HD wallets with randomly assigned account and address indices
       _dbHdWallets :: !HdWallets
 
+      -- | Externally-owned sequential HD wallets (which delegate their
+      -- private key management to third party)
+    , _dbEosHdWallets :: !EosHdWallets
+
       -- | Available updates
     , _dbUpdates   :: !Updates
     }
@@ -119,7 +125,7 @@ deriveSafeCopy 1 'base ''DB
 
 -- | Default DB
 defDB :: DB
-defDB = DB initHdWallets noUpdates
+defDB = DB initHdWallets initEosHdWallets noUpdates
 
 {-------------------------------------------------------------------------------
   Custom errors
